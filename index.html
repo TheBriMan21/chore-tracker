@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chore Tracker</title>
+<style>
+:root{--bg:#f6f5f2;--card:#fff;--ink:#1f2328;--muted:#6b7078;--line:#e3e1dc;--accent:#2f6f4f;--due:#b54708;--late:#b42318;--ok:#2f6f4f}
+@media (prefers-color-scheme:dark){:root{--bg:#16181b;--card:#1f2226;--ink:#e8e6e3;--muted:#9aa0a6;--line:#30343a;--accent:#5fb98a;--due:#f0a050;--late:#f07070;--ok:#5fb98a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:24px;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 18px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.bar button,.bar select{font:inherit}
+button{cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:6px 12px}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+select,input{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:6px 8px}
+.chip{border-radius:999px}
+.chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.list{display:flex;flex-direction:column;gap:8px}
+.chore{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.chore .info{flex:1;min-width:0}
+.chore .name{font-weight:600}
+.chore .meta{color:var(--muted);font-size:13px}
+.status{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.status.ok{color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent)}
+.status.due{color:var(--due);background:color-mix(in srgb,var(--due) 14%,transparent)}
+.status.late{color:var(--late);background:color-mix(in srgb,var(--late) 14%,transparent)}
+.done{background:var(--accent);color:#fff;border-color:var(--accent);white-space:nowrap}
+.icon{border:none;background:none;color:var(--muted);padding:4px 6px}
+.empty{color:var(--muted);text-align:center;padding:30px}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);padding:18px;width:min(420px,calc(100vw - 32px))}
+dialog::backdrop{background:rgba(0,0,0,.35)}
+dialog h2{margin:0 0 12px;font-size:18px}
+label{display:block;margin:10px 0 4px;font-size:13px;color:var(--muted)}
+dialog input,dialog select{width:100%}
+.row{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+.hist{max-height:50vh;overflow:auto;font-size:14px}
+.hist div{padding:6px 0;border-bottom:1px solid var(--line)}
+.people span{display:inline-flex;align-items:center;gap:4px;margin:4px 6px 0 0;padding:3px 4px 3px 10px;border:1px solid var(--line);border-radius:999px}
+footer{margin-top:28px;color:var(--muted);font-size:12px;display:flex;gap:10px;flex-wrap:wrap}
+footer button{font-size:12px;padding:4px 8px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Chore Tracker</h1>
+  <p class="sub" id="summary"></p>
+  <div class="bar" id="filters"></div>
+  <div class="bar">
+    <button class="primary" id="addBtn">+ Add chore</button>
+    <button id="peopleBtn">People</button>
+    <button id="histBtn">History</button>
+  </div>
+  <div class="list" id="list"></div>
+  <footer>
+    <span>Saved in this browser.</span>
+    <button id="exportBtn">Export backup</button>
+    <button id="importBtn">Import backup</button>
+    <input type="file" id="importFile" accept=".json" hidden>
+  </footer>
+</main>
+
+<dialog id="choreDlg"><form method="dialog" id="choreForm">
+  <h2 id="choreTitle">Add chore</h2>
+  <label>Chore</label><input name="name" required placeholder="e.g. Take out trash">
+  <label>Assigned to</label><select name="who"></select>
+  <label>How often</label>
+  <select name="every">
+    <option value="1">Daily</option><option value="2">Every 2 days</option><option value="3">Every 3 days</option>
+    <option value="7">Weekly</option><option value="14">Every 2 weeks</option><option value="30">Monthly</option>
+    <option value="90">Every 3 months</option>
+  </select>
+  <div class="row"><button value="del" id="delBtn" style="margin-right:auto">Delete</button><button value="cancel" formnovalidate>Cancel</button><button value="save" class="primary">Save</button></div>
+</form></dialog>
+
+<dialog id="doneDlg"><form method="dialog">
+  <h2 id="doneTitle">Mark done</h2>
+  <label>Who did it?</label><select id="doneWho"></select>
+  <label>When?</label><input type="date" id="doneDate">
+  <div class="row"><button value="cancel">Cancel</button><button value="save" class="primary">Done ✓</button></div>
+</form></dialog>
+
+<dialog id="peopleDlg"><form method="dialog">
+  <h2>People</h2>
+  <div class="people" id="peopleList"></div>
+  <label>Add someone</label>
+  <div style="display:flex;gap:8px"><input id="newPerson" placeholder="Name"><button type="button" id="addPerson">Add</button></div>
+  <div class="row"><button value="close" class="primary">Close</button></div>
+</form></dialog>
+
+<dialog id="histDlg"><form method="dialog">
+  <h2>History</h2>
+  <div class="hist" id="histList"></div>
+  <div class="row"><button value="close" class="primary">Close</button></div>
+</form></dialog>
+
+<script>
+const KEY='chore-tracker-v1';
+const today=()=>{const d=new Date();d.setHours(0,0,0,0);return d};
+const iso=d=>{const z=new Date(d);return z.getFullYear()+'-'+String(z.getMonth()+1).padStart(2,'0')+'-'+String(z.getDate()).padStart(2,'0')};
+const parse=s=>{const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d)};
+const daysBetween=(a,b)=>Math.round((b-a)/864e5);
+const uid=()=>Math.random().toString(36).slice(2,9);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const FREQ={1:'Daily',2:'Every 2 days',3:'Every 3 days',7:'Weekly',14:'Every 2 weeks',30:'Monthly',90:'Every 3 months'};
+
+function defaults(){
+  const p=['Parent 1','Parent 2','Kid'];
+  const c=[['Take out trash',p[0],3],['Do the dishes',p[2],1],['Vacuum living room',p[1],7],['Clean bathroom',p[0],7],['Laundry',p[1],7],['Water plants',p[2],3],['Change bed sheets',p[1],14],['Clean out fridge',p[0],30]];
+  return {people:p,chores:c.map(([name,who,every])=>({id:uid(),name,who,every,last:null})),log:[]};
+}
+let S;
+try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){}
+if(!S||!S.chores)S=defaults();
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+let filter='All';
+
+function status(c){
+  if(!c.last)return{cls:'due',text:'Not done yet',rank:0,days:-1};
+  const since=daysBetween(parse(c.last),today()), left=c.every-since;
+  if(left<0)return{cls:'late',text:`${-left} day${left===-1?'':'s'} overdue`,rank:left,days:since};
+  if(left===0)return{cls:'due',text:'Due today',rank:0,days:since};
+  return{cls:'ok',text:`Due in ${left} day${left===1?'':'s'}`,rank:left,days:since};
+}
+function lastText(c){
+  if(!c.last)return'Never done';
+  const d=daysBetween(parse(c.last),today());
+  const when=d===0?'today':d===1?'yesterday':`${d} days ago`;
+  return `Last done ${when}${c.lastBy?' by '+esc(c.lastBy):''}`;
+}
+
+function render(){
+  const f=document.getElementById('filters');
+  f.innerHTML=['All',...S.people].map(p=>`<button class="chip ${p===filter?'on':''}" data-p="${esc(p)}">${esc(p)}</button>`).join('');
+  f.querySelectorAll('button').forEach(b=>b.onclick=()=>{filter=b.dataset.p;render()});
+  const items=S.chores.filter(c=>filter==='All'||c.who===filter).map(c=>({c,s:status(c)})).sort((a,b)=>a.s.rank-b.s.rank);
+  const list=document.getElementById('list');
+  list.innerHTML=items.length?items.map(({c,s})=>`
+    <div class="chore">
+      <div class="info"><div class="name">${esc(c.name)}</div>
+        <div class="meta">${esc(c.who||'Anyone')} · ${FREQ[c.every]||('Every '+c.every+' days')} · ${lastText(c)}</div></div>
+      <span class="status ${s.cls}">${s.text}</span>
+      <button class="done" data-id="${c.id}">Done</button>
+      <button class="icon" title="Edit" data-edit="${c.id}">✎</button>
+    </div>`).join(''):`<div class="empty">No chores here yet.</div>`;
+  list.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>openDone(b.dataset.id));
+  list.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openChore(b.dataset.edit));
+  const all=S.chores.map(status), late=all.filter(s=>s.cls==='late').length, due=all.filter(s=>s.cls==='due').length;
+  document.getElementById('summary').textContent=late||due?`${late} overdue · ${due} due today or not started · ${S.chores.length} chores total`:`All caught up! ${S.chores.length} chores total.`;
+}
+
+function peopleOptions(sel,val,anyone){
+  sel.innerHTML=(anyone?['<option value="">Anyone</option>']:[]).concat(S.people.map(p=>`<option ${p===val?'selected':''}>${esc(p)}</option>`)).join('');
+  if(val!==undefined)sel.value=val;
+}
+
+const choreDlg=document.getElementById('choreDlg'), form=document.getElementById('choreForm');
+let editing=null;
+function openChore(id){
+  editing=id?S.chores.find(c=>c.id===id):null;
+  document.getElementById('choreTitle').textContent=editing?'Edit chore':'Add chore';
+  document.getElementById('delBtn').style.display=editing?'':'none';
+  form.name.value=editing?editing.name:'';
+  peopleOptions(form.who,editing?editing.who:(filter!=='All'?filter:S.people[0]),true);
+  form.every.value=editing?editing.every:7;
+  choreDlg.showModal();
+}
+choreDlg.addEventListener('close',()=>{
+  const v=choreDlg.returnValue;
+  if(v==='save'&&form.name.value.trim()){
+    const data={name:form.name.value.trim(),who:form.who.value,every:+form.every.value};
+    if(editing)Object.assign(editing,data);else S.chores.push({id:uid(),last:null,...data});
+  }else if(v==='del'&&editing&&confirm(`Delete "${editing.name}"?`)){
+    S.chores=S.chores.filter(c=>c!==editing);
+  }
+  save();render();
+});
+
+const doneDlg=document.getElementById('doneDlg');let doing=null;
+function openDone(id){
+  doing=S.chores.find(c=>c.id===id);
+  document.getElementById('doneTitle').textContent=doing.name;
+  peopleOptions(document.getElementById('doneWho'),doing.who||S.people[0]);
+  const d=document.getElementById('doneDate');d.value=iso(today());d.max=iso(today());
+  doneDlg.showModal();
+}
+doneDlg.addEventListener('close',()=>{
+  if(doneDlg.returnValue!=='save'||!doing)return;
+  const date=document.getElementById('doneDate').value||iso(today()), by=document.getElementById('doneWho').value;
+  if(!doing.last||date>=doing.last){doing.last=date;doing.lastBy=by}
+  S.log.unshift({chore:doing.name,by,date});S.log=S.log.slice(0,500);
+  save();render();
+});
+
+const peopleDlg=document.getElementById('peopleDlg');
+function renderPeople(){
+  const el=document.getElementById('peopleList');
+  el.innerHTML=S.people.map((p,i)=>`<span>${esc(p)} <button type="button" class="icon" data-rm="${i}" title="Remove">✕</button></span>`).join('');
+  el.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{
+    const name=S.people[+b.dataset.rm];
+    S.people.splice(+b.dataset.rm,1);
+    S.chores.forEach(c=>{if(c.who===name)c.who=''});
+    if(filter===name)filter='All';
+    save();renderPeople();render();
+  });
+}
+document.getElementById('peopleBtn').onclick=()=>{renderPeople();peopleDlg.showModal()};
+document.getElementById('addPerson').onclick=()=>{
+  const i=document.getElementById('newPerson'),n=i.value.trim();
+  if(n&&!S.people.includes(n)){S.people.push(n);save();renderPeople();render()}
+  i.value='';i.focus();
+};
+document.getElementById('newPerson').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.getElementById('addPerson').click()}});
+
+document.getElementById('histBtn').onclick=()=>{
+  const fmt=s=>parse(s).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+  document.getElementById('histList').innerHTML=S.log.length?S.log.map(l=>`<div><b>${esc(l.chore)}</b> · ${esc(l.by)} · ${fmt(l.date)}</div>`).join(''):'<p class="empty">Nothing checked off yet.</p>';
+  document.getElementById('histDlg').showModal();
+};
+document.getElementById('addBtn').onclick=()=>openChore(null);
+
+document.getElementById('exportBtn').onclick=()=>{
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,2)],{type:'application/json'}));
+  a.download=`chores-backup-${iso(today())}.json`;a.click();
+};
+document.getElementById('importBtn').onclick=()=>document.getElementById('importFile').click();
+document.getElementById('importFile').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  f.text().then(t=>{const d=JSON.parse(t);if(d.chores&&d.people){S=d;S.log=S.log||[];save();filter='All';render()}}).catch(()=>alert('That file could not be read.'));
+};
+
+render();
+setInterval(render,60*60*1000);
+</script>
+</body>
+</html>

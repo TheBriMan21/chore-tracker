@@ -56,7 +56,7 @@ footer button{font-size:12px;padding:4px 8px}
   </div>
   <div class="list" id="list"></div>
   <footer>
-    <span>Saved in this browser.</span>
+    <span id="syncNote">Saved in this browser.</span>
     <button id="exportBtn">Export backup</button>
     <button id="importBtn">Import backup</button>
     <input type="file" id="importFile" accept=".json" hidden>
@@ -117,6 +117,14 @@ try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){}
 if(!S||!S.chores)S=defaults();
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 let filter='All';
+let remoteApply=null; // set when Firebase sync is on
+// Every change goes through mutate(fn): fn edits a state object in place, using ids/names only,
+// so the same fn can be replayed on the latest shared copy inside a Firestore transaction.
+function mutate(fn){
+  fn(S);save();render();
+  if(remoteApply)remoteApply(fn).catch(e=>{console.error(e);setSync('Sync error, retrying when online')});
+}
+function setSync(t){const el=document.getElementById('syncNote');if(el)el.textContent=t}
 
 function status(c){
   if(!c.last)return{cls:'due',text:'Not done yet',rank:0,days:-1};
@@ -172,11 +180,12 @@ choreDlg.addEventListener('close',()=>{
   const v=choreDlg.returnValue;
   if(v==='save'&&form.name.value.trim()){
     const data={name:form.name.value.trim(),who:form.who.value,every:+form.every.value};
-    if(editing)Object.assign(editing,data);else S.chores.push({id:uid(),last:null,...data});
+    const id=editing?editing.id:uid();
+    mutate(s=>{const c=s.chores.find(c=>c.id===id);if(c)Object.assign(c,data);else s.chores.push({id,last:null,...data})});
   }else if(v==='del'&&editing&&confirm(`Delete "${editing.name}"?`)){
-    S.chores=S.chores.filter(c=>c!==editing);
+    const id=editing.id;
+    mutate(s=>{s.chores=s.chores.filter(c=>c.id!==id)});
   }
-  save();render();
 });
 
 const doneDlg=document.getElementById('doneDlg');let doing=null;
@@ -190,9 +199,12 @@ function openDone(id){
 doneDlg.addEventListener('close',()=>{
   if(doneDlg.returnValue!=='save'||!doing)return;
   const date=document.getElementById('doneDate').value||iso(today()), by=document.getElementById('doneWho').value;
-  if(!doing.last||date>=doing.last){doing.last=date;doing.lastBy=by}
-  S.log.unshift({chore:doing.name,by,date});S.log=S.log.slice(0,500);
-  save();render();
+  const id=doing.id,name=doing.name;
+  mutate(s=>{
+    const c=s.chores.find(c=>c.id===id);
+    if(c&&(!c.last||date>=c.last)){c.last=date;c.lastBy=by}
+    s.log=[{chore:name,by,date},...(s.log||[])].slice(0,500);
+  });
 });
 
 const peopleDlg=document.getElementById('peopleDlg');
@@ -201,16 +213,15 @@ function renderPeople(){
   el.innerHTML=S.people.map((p,i)=>`<span>${esc(p)} <button type="button" class="icon" data-rm="${i}" title="Remove">✕</button></span>`).join('');
   el.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{
     const name=S.people[+b.dataset.rm];
-    S.people.splice(+b.dataset.rm,1);
-    S.chores.forEach(c=>{if(c.who===name)c.who=''});
     if(filter===name)filter='All';
-    save();renderPeople();render();
+    mutate(s=>{s.people=s.people.filter(p=>p!==name);s.chores.forEach(c=>{if(c.who===name)c.who=''})});
+    renderPeople();
   });
 }
 document.getElementById('peopleBtn').onclick=()=>{renderPeople();peopleDlg.showModal()};
 document.getElementById('addPerson').onclick=()=>{
   const i=document.getElementById('newPerson'),n=i.value.trim();
-  if(n&&!S.people.includes(n)){S.people.push(n);save();renderPeople();render()}
+  if(n&&!S.people.includes(n)){mutate(s=>{if(!s.people.includes(n))s.people.push(n)});renderPeople()}
   i.value='';i.focus();
 };
 document.getElementById('newPerson').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.getElementById('addPerson').click()}});
@@ -229,11 +240,52 @@ document.getElementById('exportBtn').onclick=()=>{
 document.getElementById('importBtn').onclick=()=>document.getElementById('importFile').click();
 document.getElementById('importFile').onchange=e=>{
   const f=e.target.files[0];if(!f)return;
-  f.text().then(t=>{const d=JSON.parse(t);if(d.chores&&d.people){S=d;S.log=S.log||[];save();filter='All';render()}}).catch(()=>alert('That file could not be read.'));
+  f.text().then(t=>{const d=JSON.parse(t);if(d.chores&&d.people){filter='All';mutate(s=>{s.people=d.people;s.chores=d.chores;s.log=d.log||[]})}}).catch(()=>alert('That file could not be read.'));
 };
 
 render();
 setInterval(render,60*60*1000);
+</script>
+
+<script type="module">
+// ---- Shared sync (optional) ----
+// Paste your Firebase web app config here to share one chore list across every device.
+// Leave apiKey empty to keep data only in this browser.
+const FIREBASE_CONFIG = {
+  apiKey: "",
+  authDomain: "",
+  projectId: "",
+  appId: ""
+};
+const HOUSEHOLD = "home"; // document name in Firestore; change it to start a separate list
+
+if (FIREBASE_CONFIG.apiKey) {
+  const V = "10.12.2";
+  try {
+    const { initializeApp } = await import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`);
+    const { getFirestore, doc, onSnapshot, runTransaction, setDoc } = await import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`);
+    const db = getFirestore(initializeApp(FIREBASE_CONFIG));
+    const ref = doc(db, "households", HOUSEHOLD);
+    const clean = o => JSON.parse(JSON.stringify(o)); // strip undefined for Firestore
+    remoteApply = fn => runTransaction(db, async tx => {
+      const snap = await tx.get(ref);
+      const d = snap.exists() ? snap.data() : clean(S);
+      d.log = d.log || [];
+      fn(d);
+      tx.set(ref, clean(d));
+    });
+    setSync("Connecting…");
+    onSnapshot(ref, snap => {
+      if (!snap.exists()) { setDoc(ref, clean(S)); return; } // first device seeds the shared list
+      S = snap.data(); S.log = S.log || [];
+      save(); render();
+      setSync(snap.metadata.hasPendingWrites ? "Saving…" : "Synced across devices");
+    }, e => { console.error(e); setSync("Can't reach the shared list (showing this device's copy)"); });
+  } catch (e) {
+    console.error(e);
+    setSync("Offline: showing this device's copy");
+  }
+}
 </script>
 </body>
 </html>

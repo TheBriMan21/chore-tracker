@@ -108,8 +108,8 @@ const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'
 const FREQ={1:'Daily',2:'Every 2 days',3:'Every 3 days',7:'Weekly',14:'Every 2 weeks',30:'Monthly',90:'Every 3 months'};
 
 function defaults(){
-  const p=['Parent 1','Parent 2','Kid'];
-  const c=[['Take out trash',p[0],3],['Do the dishes',p[2],1],['Vacuum living room',p[1],7],['Clean bathroom',p[0],7],['Laundry',p[1],7],['Water plants',p[2],3],['Change bed sheets',p[1],14],['Clean out fridge',p[0],30]];
+  const p=['Madeline'];
+  const c=[['Make bed',p[0],1],['Take recycling out',p[0],1],['Read 20 minutes',p[0],1],['Pick out clothes for next day',p[0],1],['Clean room',p[0],1],['Empty dishwasher',p[0],7],['Sweep',p[0],7]];
   return {people:p,chores:c.map(([name,who,every])=>({id:uid(),name,who,every,last:null})),log:[]};
 }
 let S;

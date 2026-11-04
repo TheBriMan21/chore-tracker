@@ -40,6 +40,15 @@ dialog input,dialog select{width:100%}
 .hist{max-height:50vh;overflow:auto;font-size:14px}
 .hist div{padding:6px 0;border-bottom:1px solid var(--line)}
 .people span{display:inline-flex;align-items:center;gap:4px;margin:4px 6px 0 0;padding:3px 4px 3px 10px;border:1px solid var(--line);border-radius:999px}
+#celebrate{display:none;text-align:center;background:linear-gradient(135deg,#ffe08a,#ffb3c7 55%,#b9d8ff);color:#2a1f3d;border-radius:16px;padding:18px 16px;margin-bottom:14px;box-shadow:0 4px 16px rgba(0,0,0,.08)}
+#celebrate.show{display:block;animation:pop .5s cubic-bezier(.2,1.6,.4,1)}
+#celebrate .big{font-size:40px;line-height:1;margin-bottom:6px}
+#celebrate .msg{font-size:20px;font-weight:700}
+#celebrate .small{font-size:14px;margin-top:4px;opacity:.85}
+@keyframes pop{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+.confetti{position:fixed;top:-12px;width:10px;height:14px;border-radius:2px;pointer-events:none;z-index:99;animation:fall linear forwards}
+@keyframes fall{to{transform:translateY(105vh) rotate(720deg);opacity:.9}}
+@media (prefers-reduced-motion:reduce){#celebrate.show{animation:none}.confetti{display:none}}
 footer{margin-top:28px;color:var(--muted);font-size:12px;display:flex;gap:10px;flex-wrap:wrap}
 footer button{font-size:12px;padding:4px 8px}
 </style>
@@ -54,6 +63,7 @@ footer button{font-size:12px;padding:4px 8px}
     <button id="peopleBtn">People</button>
     <button id="histBtn">History</button>
   </div>
+  <div id="celebrate" role="status"><div class="big" id="celEmoji">🎉</div><div class="msg" id="celMsg"></div><div class="small" id="celSmall"></div></div>
   <div class="list" id="list"></div>
   <footer>
     <span id="syncNote">Saved in this browser.</span>
@@ -140,6 +150,29 @@ function lastText(c){
   return `Last done ${when}${c.lastBy?' by '+esc(c.lastBy):''}`;
 }
 
+const CHEERS=[
+  ['🎉','All done today, {n}!','You crushed it. Go have some fun!'],
+  ['🌟','Superstar, {n}!','Every chore is checked off. Amazing!'],
+  ['🏆','Chore champion!','{n} finished everything for today.'],
+  ['🦄','Magical work, {n}!','Nothing left to do today. Enjoy!'],
+  ['🚀','Mission complete!','Way to go, {n}. All chores done!'],
+  ['🍦','Treat yourself, {n}!','Today\'s list is all checked off.']
+];
+function cheerFor(){const d=today();return CHEERS[(d.getFullYear()*372+d.getMonth()*31+d.getDate())%CHEERS.length]}
+function allDoneFor(who){
+  const mine=S.chores.filter(c=>who==='All'||c.who===who);
+  return mine.length>0&&mine.every(c=>status(c).cls==='ok');
+}
+function confetti(){
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  const colors=['#ff5d8f','#ffd23f','#3ec1d3','#7bd389','#a78bfa','#ff9f1c'];
+  for(let i=0;i<90;i++){
+    const e=document.createElement('div');e.className='confetti';
+    e.style.left=Math.random()*100+'vw';e.style.background=colors[i%colors.length];
+    e.style.animationDuration=(1.8+Math.random()*1.6)+'s';e.style.animationDelay=(Math.random()*.4)+'s';
+    document.body.appendChild(e);setTimeout(()=>e.remove(),4000);
+  }
+}
 function render(){
   const f=document.getElementById('filters');
   f.innerHTML=['All',...S.people].map(p=>`<button class="chip ${p===filter?'on':''}" data-p="${esc(p)}">${esc(p)}</button>`).join('');
@@ -157,6 +190,15 @@ function render(){
   list.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>openDone(b.dataset.id));
   list.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openChore(b.dataset.edit));
   const all=S.chores.map(status), late=all.filter(s=>s.cls==='late').length, due=all.filter(s=>s.cls==='due').length;
+  const cel=document.getElementById('celebrate'), done=allDoneFor(filter);
+  if(done){
+    const names=filter!=='All'?filter:(S.people.length===1?S.people[0]:'everyone');
+    const [em,msg,small]=cheerFor();
+    document.getElementById('celEmoji').textContent=em;
+    document.getElementById('celMsg').textContent=msg.replace('{n}',names);
+    document.getElementById('celSmall').textContent=small.replace('{n}',names);
+  }
+  cel.classList.toggle('show',done);
   document.getElementById('summary').textContent=late||due?`${late} overdue · ${due} due today or not started · ${S.chores.length} chores total`:`All caught up! ${S.chores.length} chores total.`;
 }
 
@@ -199,12 +241,13 @@ function openDone(id){
 doneDlg.addEventListener('close',()=>{
   if(doneDlg.returnValue!=='save'||!doing)return;
   const date=document.getElementById('doneDate').value||iso(today()), by=document.getElementById('doneWho').value;
-  const id=doing.id,name=doing.name;
+  const id=doing.id,name=doing.name, before=allDoneFor(filter);
   mutate(s=>{
     const c=s.chores.find(c=>c.id===id);
     if(c&&(!c.last||date>=c.last)){c.last=date;c.lastBy=by}
     s.log=[{chore:name,by,date},...(s.log||[])].slice(0,500);
   });
+  if(!before&&allDoneFor(filter))confetti();
 });
 
 const peopleDlg=document.getElementById('peopleDlg');

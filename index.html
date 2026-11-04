@@ -49,6 +49,9 @@ dialog input,dialog select{width:100%}
 .confetti{position:fixed;top:-12px;width:10px;height:14px;border-radius:2px;pointer-events:none;z-index:99;animation:fall linear forwards}
 @keyframes fall{to{transform:translateY(105vh) rotate(720deg);opacity:.9}}
 @media (prefers-reduced-motion:reduce){#celebrate.show{animation:none}.confetti{display:none}}
+body:not(.parent) .parent-only{display:none!important}
+#pinInput{font-size:24px;letter-spacing:8px;text-align:center}
+#pinErr{color:var(--late);font-size:13px;min-height:18px;margin-top:6px}
 footer{margin-top:28px;color:var(--muted);font-size:12px;display:flex;gap:10px;flex-wrap:wrap}
 footer button{font-size:12px;padding:4px 8px}
 </style>
@@ -59,16 +62,17 @@ footer button{font-size:12px;padding:4px 8px}
   <p class="sub" id="summary"></p>
   <div class="bar" id="filters"></div>
   <div class="bar">
-    <button class="primary" id="addBtn">+ Add chore</button>
-    <button id="peopleBtn">People</button>
+    <button class="primary parent-only" id="addBtn">+ Add chore</button>
+    <button id="peopleBtn" class="parent-only">People</button>
     <button id="histBtn">History</button>
   </div>
   <div id="celebrate" role="status"><div class="big" id="celEmoji">🎉</div><div class="msg" id="celMsg"></div><div class="small" id="celSmall"></div></div>
   <div class="list" id="list"></div>
   <footer>
     <span id="syncNote">Saved in this browser.</span>
+    <button id="parentBtn">🔒 Parent</button>
     <button id="exportBtn">Export backup</button>
-    <button id="importBtn">Import backup</button>
+    <button id="importBtn" class="parent-only">Import backup</button>
     <input type="file" id="importFile" accept=".json" hidden>
   </footer>
 </main>
@@ -99,6 +103,14 @@ footer button{font-size:12px;padding:4px 8px}
   <label>Add someone</label>
   <div style="display:flex;gap:8px"><input id="newPerson" placeholder="Name"><button type="button" id="addPerson">Add</button></div>
   <div class="row"><button value="close" class="primary">Close</button></div>
+</form></dialog>
+
+<dialog id="pinDlg"><form method="dialog" id="pinForm">
+  <h2 id="pinTitle">Parent PIN</h2>
+  <p id="pinHelp" style="margin:0;color:var(--muted);font-size:14px"></p>
+  <label>PIN</label><input id="pinInput" type="password" inputmode="numeric" autocomplete="off" minlength="4" maxlength="8" pattern="[0-9]{4,8}" required>
+  <div id="pinErr"></div>
+  <div class="row"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary" id="pinOk">Unlock</button></div>
 </form></dialog>
 
 <dialog id="histDlg"><form method="dialog">
@@ -174,6 +186,7 @@ function confetti(){
   }
 }
 function render(){
+  if(typeof applyLock==='function')applyLock();
   const f=document.getElementById('filters');
   f.innerHTML=['All',...S.people].map(p=>`<button class="chip ${p===filter?'on':''}" data-p="${esc(p)}">${esc(p)}</button>`).join('');
   f.querySelectorAll('button').forEach(b=>b.onclick=()=>{filter=b.dataset.p;render()});
@@ -185,7 +198,7 @@ function render(){
         <div class="meta">${esc(c.who||'Anyone')} · ${FREQ[c.every]||('Every '+c.every+' days')} · ${lastText(c)}</div></div>
       <span class="status ${s.cls}">${s.text}</span>
       <button class="done" data-id="${c.id}">Done</button>
-      <button class="icon" title="Edit" data-edit="${c.id}">✎</button>
+      <button class="icon parent-only" title="Edit" data-edit="${c.id}">✎</button>
     </div>`).join(''):`<div class="empty">No chores here yet.</div>`;
   list.querySelectorAll('[data-id]').forEach(b=>b.onclick=()=>openDone(b.dataset.id));
   list.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>openChore(b.dataset.edit));
@@ -275,6 +288,36 @@ document.getElementById('histBtn').onclick=()=>{
   document.getElementById('histDlg').showModal();
 };
 document.getElementById('addBtn').onclick=()=>openChore(null);
+
+// ---- Parent lock: without the PIN, chores can be checked off but not added, edited or deleted ----
+const UNLOCK_KEY='chore-tracker-parent';
+const hashPin=async pin=>{const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('chore-tracker:'+pin));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')};
+const getUnlock=()=>{try{return localStorage.getItem(UNLOCK_KEY)}catch(e){return null}};
+const setUnlock=v=>{try{v?localStorage.setItem(UNLOCK_KEY,v):localStorage.removeItem(UNLOCK_KEY)}catch(e){}};
+function isParent(){return !!S.pinHash&&getUnlock()===S.pinHash}
+function applyLock(){
+  const on=isParent();
+  document.body.classList.toggle('parent',on);
+  document.getElementById('parentBtn').textContent=on?'🔓 Lock (parent mode on)':(S.pinHash?'🔒 Parent':'🔒 Set parent PIN');
+}
+const pinDlg=document.getElementById('pinDlg'),pinInput=document.getElementById('pinInput');
+document.getElementById('parentBtn').onclick=()=>{
+  if(isParent()){setUnlock(null);render();return}
+  const setting=!S.pinHash;
+  document.getElementById('pinTitle').textContent=setting?'Create a parent PIN':'Parent PIN';
+  document.getElementById('pinHelp').textContent=setting?'Pick 4 to 8 digits. Anyone with the PIN can add, edit and delete chores.':'Enter the PIN to add, edit or delete chores.';
+  document.getElementById('pinOk').textContent=setting?'Set PIN':'Unlock';
+  document.getElementById('pinErr').textContent='';pinInput.value='';
+  pinDlg.showModal();pinInput.focus();
+};
+document.getElementById('pinForm').addEventListener('submit',async e=>{
+  if(e.submitter&&e.submitter.value!=='ok')return;
+  e.preventDefault();
+  const h=await hashPin(pinInput.value);
+  if(!S.pinHash){mutate(s=>{if(!s.pinHash)s.pinHash=h});}
+  if(h===S.pinHash){setUnlock(h);pinDlg.close();render();}
+  else{document.getElementById('pinErr').textContent='That PIN is not right.';pinInput.value='';pinInput.focus();}
+});
 
 document.getElementById('exportBtn').onclick=()=>{
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,2)],{type:'application/json'}));

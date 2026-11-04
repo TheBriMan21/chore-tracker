@@ -6,6 +6,10 @@ A simple household chore tracker in a single HTML file. No install, no server.
 - Overdue and due chores sort to the top. Press **Done** to check one off.
 - Filter by person, edit chores and people, and see a history of check-offs.
 
+## Parent PIN
+
+Tap **🔒 Set parent PIN** at the bottom to create a PIN. Without it, anyone can check chores off but can't add, edit or delete chores or people. Each device stays unlocked until you tap **Lock**. It's a kid-proof lock, not real security.
+
 ## Using it
 
 Open `index.html` in any browser. Data is saved in that browser (localStorage), so each device keeps its own list. Use **Export backup** / **Import backup** to move data between devices.

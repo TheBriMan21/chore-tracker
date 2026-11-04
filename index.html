@@ -5,33 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chore Tracker</title>
 <style>
-:root{--bg:#f6f5f2;--card:#fff;--ink:#1f2328;--muted:#6b7078;--line:#e3e1dc;--accent:#2f6f4f;--due:#b54708;--late:#b42318;--ok:#2f6f4f}
-@media (prefers-color-scheme:dark){:root{--bg:#16181b;--card:#1f2226;--ink:#e8e6e3;--muted:#9aa0a6;--line:#30343a;--accent:#5fb98a;--due:#f0a050;--late:#f07070;--ok:#5fb98a}}
+:root{--bg:#fdf3f8;--bg2:#eaf5ff;--card:#fff;--ink:#3a2a44;--muted:#7a6a85;--line:#f6d3e4;--accent:#d94a8c;--accent2:#7cc4f2;--blue-soft:#e3f2fd;--pink-soft:#fde4f0;--due:#c2410c;--late:#c0264b;--ok:#1f6fa8}
+@media (prefers-color-scheme:dark){:root{--bg:#1d1828;--bg2:#14223a;--card:#261f33;--ink:#f5eaf2;--muted:#b8a8c4;--line:#3f3150;--accent:#f06aa8;--accent2:#7cc4f2;--blue-soft:#1c3550;--pink-soft:#3d2238;--due:#f5a35c;--late:#ff7a95;--ok:#8fd0ff}}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+body{margin:0;min-height:100vh;background:linear-gradient(160deg,var(--bg) 0%,var(--bg2) 100%) fixed;color:var(--ink);font:15px/1.45 ui-rounded,"SF Pro Rounded",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
 main{max-width:760px;margin:0 auto;padding:20px 16px 60px}
-h1{font-size:24px;margin:0 0 4px}
+h1{font-size:28px;margin:0 0 4px;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;font-weight:800}
 .sub{color:var(--muted);margin:0 0 18px}
 .bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
 .bar button,.bar select{font:inherit}
-button{cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:6px 12px}
+button{cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:7px 14px}
 button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 select,input{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:6px 8px}
 .chip{border-radius:999px}
-.chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chip.on{background:var(--accent2);color:#0d3550;border-color:var(--accent2);font-weight:600}
 .list{display:flex;flex-direction:column;gap:8px}
-.chore{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.chore{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-left:6px solid var(--accent);border-radius:16px;padding:12px 14px;box-shadow:0 2px 8px rgba(217,74,140,.08)}
+.chore.is-ok{border-left-color:var(--accent2);background:var(--blue-soft)}
 .chore .info{flex:1;min-width:0}
 .chore .name{font-weight:600}
 .chore .meta{color:var(--muted);font-size:13px}
 .status{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
-.status.ok{color:var(--ok);background:color-mix(in srgb,var(--ok) 12%,transparent)}
+.status.ok{color:var(--ok);background:color-mix(in srgb,var(--accent2) 28%,transparent)}
 .status.due{color:var(--due);background:color-mix(in srgb,var(--due) 14%,transparent)}
 .status.late{color:var(--late);background:color-mix(in srgb,var(--late) 14%,transparent)}
-.done{background:var(--accent);color:#fff;border-color:var(--accent);white-space:nowrap}
+.done{background:var(--accent);color:#fff;border-color:var(--accent);white-space:nowrap;font-weight:600}
+.chore.is-ok .done{background:var(--card);color:var(--accent);border-color:var(--line)}
 .icon{border:none;background:none;color:var(--muted);padding:4px 6px}
 .empty{color:var(--muted);text-align:center;padding:30px}
-dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);padding:18px;width:min(420px,calc(100vw - 32px))}
+dialog{border:1px solid var(--line);border-radius:20px;background:var(--card);color:var(--ink);padding:18px;width:min(420px,calc(100vw - 32px))}
 dialog::backdrop{background:rgba(0,0,0,.35)}
 dialog h2{margin:0 0 12px;font-size:18px}
 label{display:block;margin:10px 0 4px;font-size:13px;color:var(--muted)}
@@ -186,6 +188,7 @@ function confetti(){
   }
 }
 function render(){
+  const ttl=S.people.length===1?`${S.people[0]}'s Chores ✨`:'Chore Tracker';document.querySelector('h1').textContent=ttl;document.title=ttl;
   if(typeof applyLock==='function')applyLock();
   const f=document.getElementById('filters');
   f.innerHTML=['All',...S.people].map(p=>`<button class="chip ${p===filter?'on':''}" data-p="${esc(p)}">${esc(p)}</button>`).join('');
@@ -193,7 +196,7 @@ function render(){
   const items=S.chores.filter(c=>filter==='All'||c.who===filter).map(c=>({c,s:status(c)})).sort((a,b)=>a.s.rank-b.s.rank);
   const list=document.getElementById('list');
   list.innerHTML=items.length?items.map(({c,s})=>`
-    <div class="chore">
+    <div class="chore ${s.cls==='ok'?'is-ok':''}">
       <div class="info"><div class="name">${esc(c.name)}</div>
         <div class="meta">${esc(c.who||'Anyone')} · ${FREQ[c.every]||('Every '+c.every+' days')} · ${lastText(c)}</div></div>
       <span class="status ${s.cls}">${s.text}</span>

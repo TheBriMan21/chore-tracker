@@ -52,13 +52,21 @@ dialog input,dialog select{width:100%}
 @keyframes fall{to{transform:translateY(105vh) rotate(720deg);opacity:.9}}
 @media (prefers-reduced-motion:reduce){#celebrate.show{animation:none}.confetti{display:none}}
 body:not(.parent) .parent-only{display:none!important}
-#pinInput{font-size:24px;letter-spacing:8px;text-align:center}
-#pinErr{color:var(--late);font-size:13px;min-height:18px;margin-top:6px}
+#gate{display:none;max-width:420px;width:calc(100% - 32px);margin:12vh auto 0;padding:28px 22px;text-align:center;background:var(--card);border:1px solid var(--line);border-radius:24px;box-shadow:0 6px 24px rgba(217,74,140,.12)}
+body.gated #gate{display:block}body.gated main{display:none}
+#gate .big{font-size:44px}#gate h2{margin:6px 0 8px}#gate p{color:var(--muted);margin:0 0 18px}
+#gate button{font-size:16px;padding:10px 18px}
+.access{margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}
+.access h3{font-size:15px;margin:0 0 4px}.access p{margin:0 0 6px;color:var(--muted);font-size:13px}
+.access .who{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:14px;word-break:break-all}
+.access .who b{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600;white-space:nowrap}
+.access .who span{flex:1}
 footer{margin-top:28px;color:var(--muted);font-size:12px;display:flex;gap:10px;flex-wrap:wrap}
 footer button{font-size:12px;padding:4px 8px}
 </style>
 </head>
 <body>
+<div id="gate" role="dialog" aria-live="polite"><div class="big">🔐</div><h2 id="gateTitle">Sign in</h2><p id="gateText">Sign in with the family Google account to see the chores.</p><button class="primary" id="gateBtn">Sign in with Google</button><p id="gateErr" style="color:var(--late);margin-top:12px"></p></div>
 <main>
   <h1>Chore Tracker</h1>
   <p class="sub" id="summary"></p>
@@ -72,7 +80,8 @@ footer button{font-size:12px;padding:4px 8px}
   <div class="list" id="list"></div>
   <footer>
     <span id="syncNote">Saved in this browser.</span>
-    <button id="parentBtn">🔒 Parent</button>
+    <span id="whoami"></span>
+    <button id="signOutBtn" hidden>Sign out</button>
     <button id="exportBtn">Export backup</button>
     <button id="importBtn" class="parent-only">Import backup</button>
     <input type="file" id="importFile" accept=".json" hidden>
@@ -104,15 +113,14 @@ footer button{font-size:12px;padding:4px 8px}
   <div class="people" id="peopleList"></div>
   <label>Add someone</label>
   <div style="display:flex;gap:8px"><input id="newPerson" placeholder="Name"><button type="button" id="addPerson">Add</button></div>
+  <div class="access" id="accessBox" hidden>
+    <h3>Who can sign in</h3>
+    <p>Parents can change chores. Kids can only check chores off.</p>
+    <div id="accessList"></div>
+    <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap"><input id="newEmail" type="email" placeholder="Google email" style="flex:1;min-width:160px"><select id="newRole"><option value="members">Kid</option><option value="parents">Parent</option></select><button type="button" id="addEmail">Add</button></div>
+    <p id="accessErr" style="color:var(--late)"></p>
+  </div>
   <div class="row"><button value="close" class="primary">Close</button></div>
-</form></dialog>
-
-<dialog id="pinDlg"><form method="dialog" id="pinForm">
-  <h2 id="pinTitle">Parent PIN</h2>
-  <p id="pinHelp" style="margin:0;color:var(--muted);font-size:14px"></p>
-  <label>PIN</label><input id="pinInput" type="password" inputmode="numeric" autocomplete="off" minlength="4" maxlength="8" pattern="[0-9]{4,8}" required>
-  <div id="pinErr"></div>
-  <div class="row"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary" id="pinOk">Unlock</button></div>
 </form></dialog>
 
 <dialog id="histDlg"><form method="dialog">
@@ -134,11 +142,20 @@ const FREQ={1:'Daily',2:'Every 2 days',3:'Every 3 days',7:'Weekly',14:'Every 2 w
 function defaults(){
   const p=['Madeline'];
   const c=[['Make bed',p[0],1],['Take recycling out',p[0],1],['Read 20 minutes',p[0],1],['Pick out clothes for next day',p[0],1],['Clean room',p[0],1],['Empty dishwasher',p[0],7],['Sweep',p[0],7]];
-  return {people:p,chores:c.map(([name,who,every])=>({id:uid(),name,who,every,last:null})),log:[]};
+  return {people:p,chores:c.map(([name,who,every])=>({id:uid(),name,who,every})),done:{},log:[]};
 }
 let S;
 try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){}
 if(!S||!S.chores)S=defaults();
+// Check-offs live in S.done[choreId] = {last, lastBy}, apart from the chore list, so the database
+// rules can let kids record check-offs without being able to change the chores themselves.
+function norm(s){
+  s.done=s.done||{};s.log=s.log||[];s.people=s.people||[];s.chores=s.chores||[];
+  s.chores.forEach(c=>{if(c.last&&!s.done[c.id])s.done[c.id]={last:c.last,lastBy:c.lastBy||''};delete c.last;delete c.lastBy});
+  delete s.pinHash;return s;
+}
+norm(S);
+let canEdit=true; // false for signed-in kids; true in local-only mode
 const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
 let filter='All';
 let remoteApply=null; // set when Firebase sync is on
@@ -150,18 +167,21 @@ function mutate(fn){
 }
 function setSync(t){const el=document.getElementById('syncNote');if(el)el.textContent=t}
 
+const doneOf=c=>(S.done&&S.done[c.id])||{};
 function status(c){
-  if(!c.last)return{cls:'due',text:'Not done yet',rank:0,days:-1};
-  const since=daysBetween(parse(c.last),today()), left=c.every-since;
+  const last=doneOf(c).last;
+  if(!last)return{cls:'due',text:'Not done yet',rank:0,days:-1};
+  const since=daysBetween(parse(last),today()), left=c.every-since;
   if(left<0)return{cls:'late',text:`${-left} day${left===-1?'':'s'} overdue`,rank:left,days:since};
   if(left===0)return{cls:'due',text:'Due today',rank:0,days:since};
   return{cls:'ok',text:`Due in ${left} day${left===1?'':'s'}`,rank:left,days:since};
 }
 function lastText(c){
-  if(!c.last)return'Never done';
-  const d=daysBetween(parse(c.last),today());
+  const {last,lastBy}=doneOf(c);
+  if(!last)return'Never done';
+  const d=daysBetween(parse(last),today());
   const when=d===0?'today':d===1?'yesterday':`${d} days ago`;
-  return `Last done ${when}${c.lastBy?' by '+esc(c.lastBy):''}`;
+  return `Last done ${when}${lastBy?' by '+esc(lastBy):''}`;
 }
 
 const CHEERS=[
@@ -189,7 +209,7 @@ function confetti(){
 }
 function render(){
   const ttl=S.people.length===1?`${S.people[0]}'s Chores ✨`:'Chore Tracker';document.querySelector('h1').textContent=ttl;document.title=ttl;
-  if(typeof applyLock==='function')applyLock();
+  document.body.classList.toggle('parent',canEdit);
   const f=document.getElementById('filters');
   f.innerHTML=['All',...S.people].map(p=>`<button class="chip ${p===filter?'on':''}" data-p="${esc(p)}">${esc(p)}</button>`).join('');
   f.querySelectorAll('button').forEach(b=>b.onclick=()=>{filter=b.dataset.p;render()});
@@ -239,7 +259,7 @@ choreDlg.addEventListener('close',()=>{
   if(v==='save'&&form.name.value.trim()){
     const data={name:form.name.value.trim(),who:form.who.value,every:+form.every.value};
     const id=editing?editing.id:uid();
-    mutate(s=>{const c=s.chores.find(c=>c.id===id);if(c)Object.assign(c,data);else s.chores.push({id,last:null,...data})});
+    mutate(s=>{const c=s.chores.find(c=>c.id===id);if(c)Object.assign(c,data);else s.chores.push({id,...data})});
   }else if(v==='del'&&editing&&confirm(`Delete "${editing.name}"?`)){
     const id=editing.id;
     mutate(s=>{s.chores=s.chores.filter(c=>c.id!==id)});
@@ -259,8 +279,8 @@ doneDlg.addEventListener('close',()=>{
   const date=document.getElementById('doneDate').value||iso(today()), by=document.getElementById('doneWho').value;
   const id=doing.id,name=doing.name, before=allDoneFor(filter);
   mutate(s=>{
-    const c=s.chores.find(c=>c.id===id);
-    if(c&&(!c.last||date>=c.last)){c.last=date;c.lastBy=by}
+    const prev=(s.done||{})[id];
+    if(!prev||!prev.last||date>=prev.last)s.done={...(s.done||{}),[id]:{last:date,lastBy:by}};
     s.log=[{chore:name,by,date},...(s.log||[])].slice(0,500);
   });
   if(!before&&allDoneFor(filter))confetti();
@@ -292,36 +312,6 @@ document.getElementById('histBtn').onclick=()=>{
 };
 document.getElementById('addBtn').onclick=()=>openChore(null);
 
-// ---- Parent lock: without the PIN, chores can be checked off but not added, edited or deleted ----
-const UNLOCK_KEY='chore-tracker-parent';
-const hashPin=async pin=>{const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode('chore-tracker:'+pin));return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')};
-const getUnlock=()=>{try{return localStorage.getItem(UNLOCK_KEY)}catch(e){return null}};
-const setUnlock=v=>{try{v?localStorage.setItem(UNLOCK_KEY,v):localStorage.removeItem(UNLOCK_KEY)}catch(e){}};
-function isParent(){return !!S.pinHash&&getUnlock()===S.pinHash}
-function applyLock(){
-  const on=isParent();
-  document.body.classList.toggle('parent',on);
-  document.getElementById('parentBtn').textContent=on?'🔓 Lock (parent mode on)':(S.pinHash?'🔒 Parent':'🔒 Set parent PIN');
-}
-const pinDlg=document.getElementById('pinDlg'),pinInput=document.getElementById('pinInput');
-document.getElementById('parentBtn').onclick=()=>{
-  if(isParent()){setUnlock(null);render();return}
-  const setting=!S.pinHash;
-  document.getElementById('pinTitle').textContent=setting?'Create a parent PIN':'Parent PIN';
-  document.getElementById('pinHelp').textContent=setting?'Pick 4 to 8 digits. Anyone with the PIN can add, edit and delete chores.':'Enter the PIN to add, edit or delete chores.';
-  document.getElementById('pinOk').textContent=setting?'Set PIN':'Unlock';
-  document.getElementById('pinErr').textContent='';pinInput.value='';
-  pinDlg.showModal();pinInput.focus();
-};
-document.getElementById('pinForm').addEventListener('submit',async e=>{
-  if(e.submitter&&e.submitter.value!=='ok')return;
-  e.preventDefault();
-  const h=await hashPin(pinInput.value);
-  if(!S.pinHash){mutate(s=>{if(!s.pinHash)s.pinHash=h});}
-  if(h===S.pinHash){setUnlock(h);pinDlg.close();render();}
-  else{document.getElementById('pinErr').textContent='That PIN is not right.';pinInput.value='';pinInput.focus();}
-});
-
 document.getElementById('exportBtn').onclick=()=>{
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,2)],{type:'application/json'}));
   a.download=`chores-backup-${iso(today())}.json`;a.click();
@@ -329,7 +319,7 @@ document.getElementById('exportBtn').onclick=()=>{
 document.getElementById('importBtn').onclick=()=>document.getElementById('importFile').click();
 document.getElementById('importFile').onchange=e=>{
   const f=e.target.files[0];if(!f)return;
-  f.text().then(t=>{const d=JSON.parse(t);if(d.chores&&d.people){filter='All';mutate(s=>{s.people=d.people;s.chores=d.chores;s.log=d.log||[]})}}).catch(()=>alert('That file could not be read.'));
+  f.text().then(t=>{const d=JSON.parse(t);if(d.chores&&d.people){filter='All';const n=norm(d);mutate(s=>{s.people=n.people;s.chores=n.chores;s.done=n.done;s.log=n.log})}}).catch(()=>alert('That file could not be read.'));
 };
 
 render();
@@ -337,42 +327,119 @@ setInterval(render,60*60*1000);
 </script>
 
 <script type="module">
-// ---- Shared sync (optional) ----
-// Paste your Firebase web app config here to share one chore list across every device.
-// Leave apiKey empty to keep data only in this browser.
+// ---- Shared sync with Google sign-in ----
+// Leave apiKey empty to keep data only in this browser (no sign-in, everything editable).
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyB91OiJs2m9vTqNdR3_pSOxtlYsxzJE4r4",
   authDomain: "chore-tracker-2345a.firebaseapp.com",
   projectId: "chore-tracker-2345a",
   appId: "1:104824905573:web:30c57ec111a2baf0cc8b8c"
 };
-const HOUSEHOLD = "home"; // document name in Firestore; change it to start a separate list
+const HOUSEHOLD = "home"; // document name in Firestore
+
+const $ = id => document.getElementById(id);
+function gate(title, text, btn, err) {
+  document.body.classList.toggle('gated', !!title);
+  if (!title) return;
+  $('gateTitle').textContent = title; $('gateText').textContent = text;
+  $('gateBtn').textContent = btn; $('gateErr').textContent = err || '';
+}
 
 if (FIREBASE_CONFIG.apiKey) {
-  const V = "10.12.2";
+  const V = "10.12.2", base = `https://www.gstatic.com/firebasejs/${V}/`;
+  canEdit = false; render();
+  gate('Loading…', 'Connecting to your chore list.', '…');
   try {
-    const { initializeApp } = await import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`);
-    const { getFirestore, doc, onSnapshot, runTransaction, setDoc } = await import(`https://www.gstatic.com/firebasejs/${V}/firebase-firestore.js`);
-    const db = getFirestore(initializeApp(FIREBASE_CONFIG));
-    const ref = doc(db, "households", HOUSEHOLD);
-    const clean = o => JSON.parse(JSON.stringify(o)); // strip undefined for Firestore
+    const { initializeApp } = await import(base + "firebase-app.js");
+    const { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut } = await import(base + "firebase-auth.js");
+    const { getFirestore, doc, onSnapshot, runTransaction, updateDoc, setDoc } = await import(base + "firebase-firestore.js");
+    const app = initializeApp(FIREBASE_CONFIG);
+    const auth = getAuth(app), db = getFirestore(app);
+    const ref = doc(db, "households", HOUSEHOLD), rolesRef = doc(db, "access", "roles");
+    const clean = o => JSON.parse(JSON.stringify(o));
+    let unsubs = [], roles = { parents: [], members: [] }, me = '';
+
     remoteApply = fn => runTransaction(db, async tx => {
       const snap = await tx.get(ref);
-      const d = snap.exists() ? snap.data() : clean(S);
-      d.log = d.log || [];
+      if (!snap.exists()) throw new Error('The shared chore list is missing.');
+      const d = snap.data(); d.log = d.log || []; d.done = d.done || {};
       fn(d);
       tx.set(ref, clean(d));
     });
-    setSync("Connecting…");
-    onSnapshot(ref, snap => {
-      if (!snap.exists()) { setDoc(ref, clean(S)); return; } // first device seeds the shared list
-      S = snap.data(); S.log = S.log || [];
-      save(); render();
-      setSync(snap.metadata.hasPendingWrites ? "Saving…" : "Synced across devices");
-    }, e => { console.error(e); setSync("Can't reach the shared list (showing this device's copy)"); });
+
+    const signIn = async () => {
+      $('gateErr').textContent = '';
+      const provider = new GoogleAuthProvider(); provider.setCustomParameters({ prompt: 'select_account' });
+      try { await signInWithPopup(auth, provider); }
+      catch (e) {
+        if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') await signInWithRedirect(auth, provider);
+        else if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request') $('gateErr').textContent = 'Sign-in failed: ' + (e.code || e.message);
+      }
+    };
+    $('signOutBtn').onclick = () => signOut(auth);
+
+    // Family access list (parents only can change it; the database rules enforce this)
+    function renderAccess() {
+      const box = $('accessBox'); box.hidden = !canEdit; if (!canEdit) return;
+      const rows = [...roles.parents.map(e => [e, 'parents']), ...roles.members.map(e => [e, 'members'])];
+      $('accessList').innerHTML = rows.map(([e, r]) => `<div class="who"><b>${r === 'parents' ? 'Parent' : 'Kid'}</b><span>${esc(e)}${e === me ? ' (you)' : ''}</span>${e === me ? '' : `<button type="button" class="icon" data-e="${esc(e)}" data-r="${r}" title="Remove">✕</button>`}</div>`).join('');
+      $('accessList').querySelectorAll('[data-e]').forEach(b => b.onclick = () => saveRoles(r => { r[b.dataset.r] = r[b.dataset.r].filter(x => x !== b.dataset.e); }));
+    }
+    async function saveRoles(fn) {
+      const r = { parents: [...roles.parents], members: [...roles.members] }; fn(r);
+      $('accessErr').textContent = '';
+      try { await updateDoc(rolesRef, r); } catch (e) { console.error(e); $('accessErr').textContent = "Couldn't save that change."; }
+    }
+    $('addEmail').onclick = () => {
+      const e = $('newEmail').value.trim().toLowerCase(), role = $('newRole').value;
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) { $('accessErr').textContent = 'Enter a full email address.'; return; }
+      saveRoles(r => { r.parents = r.parents.filter(x => x !== e); r.members = r.members.filter(x => x !== e); r[role].push(e); });
+      $('newEmail').value = '';
+    };
+    const peopleBtn = $('peopleBtn'), openPeople = peopleBtn.onclick;
+    peopleBtn.onclick = () => { openPeople(); renderAccess(); };
+
+    $('gateBtn').onclick = signIn;
+    onAuthStateChanged(auth, user => {
+      unsubs.forEach(u => u()); unsubs = [];
+      if (!user) {
+        canEdit = false; render();
+        $('whoami').textContent = ''; $('signOutBtn').hidden = true;
+        gate('Sign in', 'Sign in with your Google account to see the chores.', 'Sign in with Google');
+        return;
+      }
+      me = (user.email || '').toLowerCase();
+      $('whoami').textContent = 'Signed in as ' + me; $('signOutBtn').hidden = false;
+      $('gateBtn').onclick = signIn;
+      const denied = () => {
+        gate("You're not on the family list yet", `Ask a parent to add ${me} in People → Who can sign in.`, 'Use a different account');
+        $('gateBtn').onclick = async () => { await signOut(auth); signIn(); };
+      };
+      gate('Loading…', 'Getting your chores.', '…');
+      subscribe();
+      function subscribe() {
+      unsubs.push(onSnapshot(rolesRef, snap => {
+        // First sign-in ever: create the family list with this person as the parent.
+        if (!snap.exists()) {
+          setDoc(rolesRef, { parents: [me], members: [] })
+            .then(() => { unsubs.forEach(u => u()); unsubs = []; subscribe(); }) // re-listen now that we're a member
+            .catch(e => console.error(e));
+          return;
+        }
+        const d = snap.data();
+        roles = { parents: d.parents || [], members: d.members || [] };
+        canEdit = roles.parents.includes(me); render(); renderAccess();
+      }, e => { console.error(e); if (e.code === 'permission-denied') denied(); }));
+      unsubs.push(onSnapshot(ref, snap => {
+        if (!snap.exists()) { gate('No chore list yet', 'The shared chore list has not been set up.', 'Sign out'); $('gateBtn').onclick = () => signOut(auth); return; }
+        S = norm(snap.data()); save(); render(); gate(null);
+        setSync(snap.metadata.hasPendingWrites ? "Saving…" : "Synced across devices");
+      }, e => { console.error(e); if (e.code === 'permission-denied') denied(); else setSync("Can't reach the shared list"); }));
+      }
+    });
   } catch (e) {
     console.error(e);
-    setSync("Offline: showing this device's copy");
+    gate(null); setSync("Offline: showing this device's copy (changes may not sync)");
   }
 }
 </script>

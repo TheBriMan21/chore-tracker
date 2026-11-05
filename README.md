@@ -6,9 +6,15 @@ A simple household chore tracker in a single HTML file. No install, no server.
 - Overdue and due chores sort to the top. Press **Done** to check one off.
 - Filter by person, edit chores and people, and see a history of check-offs.
 
-## Parent PIN
+## Sign-in and permissions
 
-Tap **🔒 Set parent PIN** at the bottom to create a PIN. Without it, anyone can check chores off but can't add, edit or delete chores or people. Each device stays unlocked until you tap **Lock**. It's a kid-proof lock, not real security.
+With Firebase set up, everyone signs in with Google. The family list (People → Who can sign in) says who gets in:
+
+- **Parents** can add, edit and delete chores and people, and manage who can sign in.
+- **Kids** can only check chores off.
+- Anyone else sees "You're not on the family list yet".
+
+The first person to sign in after the rules are published becomes the first parent. These limits are enforced by the database rules in `firestore.rules`, not just the app.
 
 ## Using it
 
@@ -16,25 +22,8 @@ Open `index.html` in any browser. Data is saved in that browser (localStorage), 
 
 ## Sharing across devices (Firebase)
 
-Out of the box each device keeps its own list. To share one list across every phone, iPad and laptop, the app can sync through a free Firebase Firestore database:
-
-1. Go to <https://console.firebase.google.com>, click **Create a project** (any name, Google Analytics off is fine).
-2. In the project, open **Build → Firestore Database → Create database**. Pick a nearby location and start in **production mode**.
-3. On the **Rules** tab, replace the rules with the block below and click **Publish**.
-4. Go to **Project settings** (gear icon) → **Your apps** → the **</>** (Web) button. Register an app (no hosting needed) and copy the `firebaseConfig` values.
-5. Paste `apiKey`, `authDomain`, `projectId` and `appId` into `FIREBASE_CONFIG` near the bottom of `index.html`.
-
-```
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
-    match /households/{id} {
-      allow read, write: if true;
-    }
-  }
-}
-```
-
-The footer shows "Synced across devices" when it's connected. The first device to connect uploads its list; after that every device shares it.
-
-Note: the Firebase config is not a secret, but these rules mean anyone who has it could edit the chore list. That's fine for a chore list; don't store anything sensitive in it.
+1. Create a project at <https://console.firebase.google.com> and add a **Firestore Database** (production mode).
+2. **Build → Authentication → Get started → Sign-in method → Google → Enable**.
+3. **Authentication → Settings → Authorized domains → Add domain**: the site's domain (e.g. `yourname.github.io`).
+4. **Project settings → Your apps → Web (</>)**: copy `apiKey`, `authDomain`, `projectId`, `appId` into `FIREBASE_CONFIG` in `index.html`.
+5. **Firestore → Rules**: paste the contents of `firestore.rules` and **Publish**. Then sign in right away so you become the first parent.

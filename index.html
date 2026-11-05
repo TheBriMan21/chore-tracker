@@ -281,7 +281,7 @@ doneDlg.addEventListener('close',()=>{
   mutate(s=>{
     const prev=(s.done||{})[id];
     if(!prev||!prev.last||date>=prev.last)s.done={...(s.done||{}),[id]:{last:date,lastBy:by}};
-    s.log=[{chore:name,by,date},...(s.log||[])].slice(0,500);
+    s.log=[{chore:name,id,by,date},...(s.log||[])].slice(0,500);
   });
   if(!before&&allDoneFor(filter))confetti();
 });

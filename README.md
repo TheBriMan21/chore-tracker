@@ -27,3 +27,13 @@ Open `index.html` in any browser. Data is saved in that browser (localStorage), 
 3. **Authentication → Settings → Authorized domains → Add domain**: the site's domain (e.g. `yourname.github.io`).
 4. **Project settings → Your apps → Web (</>)**: copy `apiKey`, `authDomain`, `projectId`, `appId` into `FIREBASE_CONFIG` in `index.html`.
 5. **Firestore → Rules**: paste the contents of `firestore.rules` and **Publish**. Then sign in right away so you become the first parent.
+
+## Weekly email report
+
+Every Sunday at 3 PM Eastern, a GitHub Action (`.github/workflows/weekly-report.yml`) emails each parent on the family list a summary of the past 7 days: completion rate, all-done days, and a day-by-day grid. Press **Run workflow** on the Actions tab to send one right away.
+
+It needs three repository secrets (Settings → Secrets and variables → Actions):
+
+- `FIREBASE_SERVICE_ACCOUNT`: Firebase console → Project settings → Service accounts → **Generate new private key**; paste the whole JSON file.
+- `GMAIL_USER`: the Gmail address that sends the report.
+- `GMAIL_APP_PASSWORD`: a Google [app password](https://myaccount.google.com/apppasswords) for that address (needs 2-Step Verification).

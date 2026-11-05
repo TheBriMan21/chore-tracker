@@ -1,0 +1,39 @@
+name: Weekly chore report
+
+on:
+  schedule:
+    # Sundays at 3 PM Eastern. GitHub cron is UTC, so both 19:00 (EDT) and 20:00 (EST)
+    # are listed and the script only sends from the one that is 3 PM local.
+    - cron: "0 19 * * 0"
+    - cron: "0 20 * * 0"
+  workflow_dispatch: # "Run workflow" button sends a report right away
+
+permissions:
+  contents: read
+  actions: write # lets the job keep its own schedule from being paused for inactivity
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: report
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci --no-audit --no-fund
+      - run: node weekly-report.mjs
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          SCHEDULE: ${{ github.event.schedule }}
+          TIMEZONE: America/New_York
+      # GitHub pauses scheduled workflows after 60 days without repo activity; re-enabling keeps it going.
+      - name: Keep schedule active
+        if: always()
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/weekly-report.yml/enable" || true
+        env:
+          GH_TOKEN: ${{ github.token }}
